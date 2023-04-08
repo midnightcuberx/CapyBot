@@ -1261,34 +1261,14 @@ class Economy(commands.Cog):
 
     @commands.command(aliases=["transfer"])
     @commands.guild_only()
-    async def give(self, ctx, *member):
-        try:
-            money = int(member[-1])
-        except ValueError:
-            await ctx.reply(
-                "You need to enter a valid amount to give!", mention_author=False
-            )
-            return
-
-        if len(member) == 0:
-            await ctx.reply(
-                "You need to specify a user to give money to!", mention_author=False
-            )
-            return
-
-        else:
-            member = discord.utils.get(ctx.guild.members, name=" ".join(member))
-
+    async def give(self, ctx, member: discord.User = None, money: int = None):
         if not member:
-            await ctx.reply(
-                "Invalid member! You must specify a user in the server!",
-                mention_author=False,
-            )
+            await ctx.reply("You need to specify a user to give money to!")
             return
 
-        # if not money:
-        # await ctx.reply("You need to specify an amount to give!")
-        # return
+        if not money:
+            await ctx.reply("You need to specify an amount to give!")
+            return
 
         # if member.bot:
         # await ctx.reply("You cannot give money to a bot!")
@@ -1472,12 +1452,10 @@ class Economy(commands.Cog):
 
     @commands.command(aliases=["balance"])
     @commands.guild_only()
-    async def bal(self, ctx, *member):
+    async def bal(self, ctx, *, member: discord.User = None):
 
-        if len(member) == 0:
+        if not member:
             member = ctx.author
-        else:
-            member = discord.utils.get(ctx.guild.members, name=" ".join(member))
 
         # if member.bot:
         # user_bal = 0
