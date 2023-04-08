@@ -210,6 +210,71 @@ class Economy(commands.Cog):
     # async def
 
     # ---------------------------------- Basic economy commands ---------------------------------------
+    @commands.command()
+    @commands.guild_only()
+    @commands.cooldown(1, 600, commands.BucketType.user)
+    async def chew(self, ctx):
+
+        if ctx.author.id not in self.users_in_db:
+            insert_new_user(collection, ctx.author)
+            self.economy[ctx.author.id] = {}
+            self.users_in_db.append(ctx.author.id)
+            user = get_dict(ctx.author)
+            self.update_economy(ctx.author, user)
+
+        else:
+            user = self.economy[
+                ctx.author.id
+            ]  # user = collection.find_one({"_id": ctx.author.id})
+
+        user_bal = user["wallet"]
+        bunnies = user["bunny"]
+
+        if bunnies < 1:
+            await ctx.reply(
+                "Your teeth broke attempting to chew curtains! Go buy a bunny at the shop!",
+                mention_author=False,
+            )
+            self.chew.reset_cooldown(ctx)
+            return
+
+        people = [
+            "teacher",
+            "friend",
+            "mum",
+            "dad",
+            "owner",
+            "principal",
+            "tutor",
+            "professor",
+            "husband",
+            "priest",
+            "lecturer",
+            "child",
+        ]
+        money = random.randint(1000, 10000)
+        max_bank = get_max_bank(user)
+        self.economy[ctx.author.id]["wallet"] += money
+        self.economy[ctx.author.id]["maxbank"] = max_bank
+        total = user_bal + money
+
+        collection.update_one(
+            {"_id": ctx.author.id}, {"$set": {"wallet": total, "maxbank": max_bank}}
+        )
+        await ctx.reply(
+            f"Someone paid you ${money} to vandalise their {random.choice(people)}'s curtains!",
+            mention_author=False,
+        )
+
+    @chew.error
+    async def chew_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.reply(
+                f"Woah there, slow down, please try again in {seconds_to_timestr(error.retry_after)}!"
+            )
+        else:
+            self.chew.reset_cooldown(ctx)
+            raise error
 
     @commands.command(aliases=["postmeme"])
     @commands.guild_only()
@@ -236,7 +301,7 @@ class Economy(commands.Cog):
                 "You cannot post memes withut a laptop! Go buy one at the shop",
                 mention_author=False,
             )
-            # self.pm.reset_cooldown(ctx)
+            self.pm.reset_cooldown(ctx)
             return
 
         memes = ["edgy", "funky", "dank", "repost", "cubing", "corona"]
@@ -1311,7 +1376,6 @@ class Economy(commands.Cog):
 
         member_bal += money
         user_bal -= money
-
         self.economy[ctx.author.id]["wallet"] = user_bal
         self.economy[member.id]["wallet"] = member_bal
 
