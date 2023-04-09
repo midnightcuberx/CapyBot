@@ -106,6 +106,18 @@ class Economy(commands.Cog):
         self.converter = MemberConverter()
         self.users_in_db = []  # [u["_id"] for u in users]
         self.economy = {}  # {u["_id"]: u["wallet"] for u in users}
+        self.weapon_type = [
+            "knife",
+            "shuriken",
+            "pistol",
+            "sniper",
+        ]
+        self.weapon_value = {
+            "knife": 10,
+            "shuriken": 25,
+            "pistol": 40,
+            "sniper": 50,
+        }
         self.itemvalue = {
             "laptop": 1500,
             "rod": 200,
@@ -114,6 +126,7 @@ class Economy(commands.Cog):
             "lifesaver": 15000,
             "capybara": 1000000000,
             "bunny": 100000,
+            "knife": 
         }
         load_db(self.economy, self.users_in_db)
 
@@ -155,7 +168,10 @@ class Economy(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def update(self, ctx, member: discord.User, thing, amount: int):
-        if thing.lower() not in get_dict(ctx.author):
+        if (
+            thing.lower() not in get_dict(ctx.author)
+            and thing.lower() not in self.weapon_type
+        ):
             return
 
         if member.id not in self.users_in_db:
@@ -172,7 +188,10 @@ class Economy(commands.Cog):
     @commands.command()
     @commands.is_owner()
     async def add(self, ctx, member: discord.User, thing, amount: int):
-        if thing.lower() not in get_dict(ctx.author):
+        if (
+            thing.lower() not in get_dict(ctx.author)
+            and thing.lower() not in self.weapon_type
+        ):
             return
 
         if member.id not in self.users_in_db:
@@ -204,10 +223,109 @@ class Economy(commands.Cog):
             await ctx.reply("User not in database!")
 
     # ---------------------------------- Murder commands ---------------------------------------
-    # @commands.command(aliases=["kill"])
-    # @commands.guild_only()
+    @commands.command(aliases=["kill"])
+    @commands.guild_only()
     # @commands.cooldown(1, 600, commands.BucketType.user)
-    # async def
+    async def murder(self, ctx, member: discord.Member = None):
+
+        if not member:
+            await ctx.reply(
+                "Please try to enter a valid member to murder!", mention_author=False
+            )
+            return
+
+        if ctx.author.id not in self.users_in_db:
+            insert_new_user(collection, ctx.author)
+            self.economy[ctx.author.id] = {}
+            self.users_in_db.append(ctx.author.id)
+            user = get_dict(ctx.author)
+            self.update_economy(ctx.author, user)
+
+        else:
+            user = self.economy[ctx.author.id]
+
+        # If member not in
+        if member.id not in self.users_in_db:
+            await ctx.reply(
+                "You cannot murder someone who doesn't have money!",
+                mention_author=False,
+            )
+            return
+
+        member_info = self.economy[member.id]
+
+        if member_info["wallet"] == 0:
+            await ctx.reply(
+                "You cannot murder someone who doesn't have money!",
+                mention_author=False,
+            )
+            return
+
+        # print(not any(x > 0 for x in [user[i] for i in user if i in self.weapon_type]))
+        # return
+        if not any(x > 0 for x in [user[i] for i in user if i in self.weapon_type]):
+            await ctx.reply(
+                "You need a weapon to kill people! Go purchase one at the shop.",
+                mention_author=False,
+            )
+            return
+
+        for item in self.weapon_type[::-1]:
+            if user[item] > 0:
+                number = self.weapon_value[item]
+                break
+
+        chance = random.randint(1, 101)
+        print(chance)
+
+        if chance > number:
+            if user["lifesaver"] > 0:
+                user["lifesaver"] -= 1
+                await ctx.reply(
+                    f"You were caught trying to murder {member} but were able to avoid dying as you had a lifesaver.",
+                    mention_author=False,
+                )
+            else:
+                print(user["wallet"])
+                member_info["wallet"] += user["wallet"]
+                user["wallet"] = 0
+                await ctx.reply(
+                    f"You were caught trying to murder {member} and were given a death sentence.",
+                    mention_author=False,
+                )
+                # maybe send message saying they got all the money as compensation
+
+        else:
+            member_bal = member_info["wallet"]
+            # pass  # do stuff with member bal and stuff because successful murder
+            if member_info["lifesaver"] > 0:
+                member_info["lifesaver"] -= 1
+                await ctx.reply(
+                    f"You attempted to kill {member} with a {item} but they survived!",
+                    mention_author=False,
+                )
+                # send member dm maybe and allow to be disabled in economy
+            else:
+                member_info["wallet"] = 0
+                user["wallet"] += member_bal
+                await ctx.reply(
+                    f"You successfully killed {member} with a {item} and inhertied all their money!",
+                    mention_author=False,
+                )
+
+        collection.update_one(
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user["wallet"], "lifesaver": user["lifesaver"]}},
+        )
+        collection.update_one(
+            {"_id": member.id},
+            {
+                "$set": {
+                    "wallet": member_info["wallet"],
+                    "lifesaver": member_info["lifesaver"],
+                }
+            },
+        )
 
     # ---------------------------------- Basic economy commands ---------------------------------------
     @commands.command()
@@ -223,9 +341,7 @@ class Economy(commands.Cog):
             self.update_economy(ctx.author, user)
 
         else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            user = self.economy[ctx.author.id]
 
         user_bal = user["wallet"]
         bunnies = user["bunny"]
@@ -458,7 +574,7 @@ class Economy(commands.Cog):
 
     @commands.command()
     @commands.guild_only()
-    @commands.cooldown(1, 150, commands.BucketType.user)
+    @commands.cooldown(1, 60, commands.BucketType.user)
     async def busk(self, ctx):
 
         luck = random.randint(1, 60)
@@ -491,16 +607,9 @@ class Economy(commands.Cog):
         )
 
         duration = random.randint(1, 60)
-        money_per_min = round(money / duration, 2)
         instruments = ["🎺", "🎻", "🎸", "🎷", "🥁", "📯", "🎹"]
         await ctx.reply(
-            "{} | {}, You busked for {} minutes and earned ${}! That equates to ${}} per minute!".format(
-                random.choice(instruments),
-                ctx.message.author.name,
-                duration,
-                money,
-                money_per_min,
-            ),
+            f"{random.choice(instruments)} | You busked for {duration} minutes and earned ${money}!",
             mention_author=False,
         )
 
@@ -766,21 +875,21 @@ class Economy(commands.Cog):
             color=0xEEE657,
         )
         embed.add_field(
-            name="Laptop-$1500", value="You can post memes with this laptop."
+            name="Laptop-$1500", value="You can post memes with this laptop.", inline=False
         )
         embed.add_field(name="Rod-$200", value="You can fish with this!")
         embed.add_field(
             name="Lifesaver-$15000",
-            value="You may die from hunting so why not have one of these handy?",
+            value="You may die from hunting so why not have one of these handy?", inline=False
         )
         embed.add_field(
             name="Gun-$5000",
-            value="You can hunt with this. But beware as there is a chance you will be shot by someone else!",
+            value="You can hunt with this. But beware as there is a chance you will be shot by someone else!", inline=False
         )
-        embed.add_field(name="Capybara- $1000000000", value="Collectable plushie")
+        embed.add_field(name="Capybara- $1000000000", value="Collectable plushie", inline=False)
         embed.add_field(
             name="Bunny- $100000",
-            value="Chew curtains fastly with your bunny to earn some quick cash!",
+            value="Chew curtains fastly with your bunny to earn some quick cash!", inline=False
         )
         await ctx.send(embed=embed)
 
@@ -940,7 +1049,7 @@ class Economy(commands.Cog):
     # fix this use the oly lb with users in server
     @commands.command(aliases=["leaderboard", "lb"])
     @commands.guild_only()
-    async def rich(self, ctx, *item):
+    async def rich(self, ctx, *, item="wallet"):
 
         lb_titles = {
             "wallet": "💰Top 5 richest users💰",
@@ -963,11 +1072,6 @@ class Economy(commands.Cog):
             "instrument": "instruments",
             "rod": "rods",
         }"""
-
-        if len(item) == 0:
-            item = "wallet"
-        else:
-            item = " ".join(item)
 
         item = item.lower()
 
@@ -1233,6 +1337,7 @@ class Economy(commands.Cog):
             )
         elif isinstance(error, commands.BadArgument):
             await ctx.reply("Please specify a valid amount to gamble!")
+            self.gamble.reset_cooldown(ctx)
         else:
             self.gamble.reset_cooldown(ctx)
             raise error
@@ -1318,6 +1423,7 @@ class Economy(commands.Cog):
             )
         elif isinstance(error, commands.BadArgument):
             await ctx.reply("Please specify a valid amount to invest!")
+            self.invest.reset_cooldown(ctx)
         else:
             self.invest.reset_cooldown(ctx)
             raise error
