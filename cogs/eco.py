@@ -234,8 +234,8 @@ class Economy(commands.Cog):
     # ---------------------------------- Murder commands ---------------------------------------
     @commands.command(aliases=["kill"])
     @commands.guild_only()
-    @commands.cooldown(1, 600, commands.BucketType.user)
-    async def murder(self, ctx, member: discord.Member = None):
+    @commands.cooldown(1, 120, commands.BucketType.user)
+    async def murder(self, ctx, member: discord.Member = None, amount: int = 1):
 
         murder_dict = {
             "knife": "stab",
@@ -249,6 +249,13 @@ class Economy(commands.Cog):
                 "Please try to enter a valid member to murder!", mention_author=False
             )
             self.murder.reset_cooldown(ctx)
+            return
+
+        if amount > 1000:
+            amount = 1000
+
+        if member.id == ctx.author.id:
+            await ctx.reply("Sorry but you are not allowed to commit suicide!")
             return
 
         if ctx.author.id not in self.users_in_db:
@@ -294,25 +301,25 @@ class Economy(commands.Cog):
                 break
 
         if item == "pistol" or item == "sniper":
-            if user["bullet"] == 0:
-                if user["knife"] == 0 and user["shuriken"] == 0:
+            if user["bullet"] < amount:
+                if user["knife"] < amount and user["shuriken"] < amount:
                     await ctx.reply(
-                        "You need bullets to shoot people! Go buy some at the store using -shop!",
+                        "You need more bullets! Go buy some at the store using -shop!",
                         mention_author=False,
                     )
                     self.murder.reset_cooldown(ctx)
                     return
                 else:
-                    if user["shuriken"] == 0:
+                    if user["shuriken"] < amount:
                         item = "knife"
                     else:
                         item = "shuriken"
-                    user[item] -= 1
+                    user[item] -= amount
             else:
-                user["bullet"] -= 1
+                user["bullet"] -= amount
 
         else:
-            user[item] -= 1
+            user[item] -= amount
 
         chance = random.randint(1, 101)
         print(chance)
@@ -322,35 +329,44 @@ class Economy(commands.Cog):
         )
         await asyncio.sleep(3)
 
-        if chance > number:
-            if user["lifesaver"] > 0:
-                user["lifesaver"] -= 1
-                await msg.edit(
-                    content=f"You were caught trying to murder {member} but were able to avoid dying as you had a lifesaver."
-                )
-            else:
-                member_info["wallet"] += user["wallet"]
-                user["wallet"] = 0
-                await msg.edit(
-                    content=f"You were caught trying to murder {member} and were given a death sentence."
-                )
-                # maybe send message saying they got all the money as compensation
-
+        break_chance = random.randint(1, 26)
+        # break_chance = 1
+        if break_chance == 1 and (item == "pistol" or item == "sniper"):
+            user[item] -= 1
+            await msg.edit(
+                content=f"Your {item} jammed and broke! Go buy a new one at the shop"
+            )
         else:
-            member_bal = member_info["wallet"]
-            # pass  # do stuff with member bal and stuff because successful murder
-            if member_info["lifesaver"] > 0:
-                member_info["lifesaver"] -= 1
-                await msg.edit(
-                    content=f"You attempted to kill {member} with a {item} but they survived!"
-                )
-                # send member dm maybe and allow to be disabled in economy
+            if chance > number:
+                if user["lifesaver"] > 0:
+                    user["lifesaver"] -= 1
+                    await msg.edit(
+                        content=f"You were caught trying to murder {member} but were able to avoid dying as you had a lifesaver."
+                    )
+                else:
+                    member_info["wallet"] += user["wallet"]
+                    user["wallet"] = 0
+                    await msg.edit(
+                        content=f"You were caught trying to murder {member} and were given a death sentence."
+                    )
+                    # maybe send message saying they got all the money as compensation
+
             else:
-                member_info["wallet"] = 0
-                user["wallet"] += member_bal
-                await msg.edit(
-                    content=f"You successfully killed {member} with a {item} and inherited all their money!"
-                )
+                member_bal = member_info["wallet"]
+                # pass  # do stuff with member bal and stuff because successful murder
+                if member_info["lifesaver"] >= amount:
+                    member_info["lifesaver"] -= amount
+                    await msg.edit(
+                        content=f"You attempted to kill {member} with a {item} but they survived!"
+                    )
+                    # send member dm maybe and allow to be disabled in economy
+                else:
+                    member_info["wallet"] = 0
+                    member_info["lifesaver"] = 0
+                    user["wallet"] += member_bal
+                    await msg.edit(
+                        content=f"You successfully killed {member} with a {item} and inherited all their money!"
+                    )
 
         collection.update_one(
             {"_id": ctx.author.id},
@@ -607,6 +623,8 @@ class Economy(commands.Cog):
                     "You were shot by a fellow hunter but you had a lifesaver and survived after being taken to hospital",
                     mention_author=False,
                 )
+                return
+
         else:
             money = random.randint(500, 5000)
             user["wallet"] += money
