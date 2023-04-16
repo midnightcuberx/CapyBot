@@ -231,7 +231,13 @@ class Economy(commands.Cog):
             await ctx.reply(e)
             await ctx.reply("User not in database!")
 
-    # ---------------------------------- Murder commands ---------------------------------------
+    # ---------------------------------- Crime commands ---------------------------------------
+
+    # @commands.command()
+    # @commands.guild_only()
+    # @commands.cooldown(1, 3600, commands.BucketType.user)
+    # async def drugs(self, ctx):
+
     @commands.command(aliases=["kill"])
     @commands.guild_only()
     @commands.cooldown(1, 120, commands.BucketType.user)
@@ -418,6 +424,118 @@ class Economy(commands.Cog):
             )
         else:
             self.murder.reset_cooldown(ctx)
+            raise error
+
+    @commands.command(aliases=["steal"])
+    @commands.guild_only()
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def rob(self, ctx, *, member: discord.User):
+
+        if member.id == ctx.author.id:
+            await ctx.reply("You cannot rob yourself, silly", mention_author=False)
+            self.rob.reset_cooldown(ctx)
+            return
+
+        # if member.bot:
+        # await ctx.reply("You cannot rob a bot!", mention_author=False)
+        # return
+
+        if member.id not in self.users_in_db:
+            await ctx.reply(
+                "That user has less than 2500 coins, you cannot rob them",
+                mention_author=False,
+            )
+            self.rob.reset_cooldown(ctx)
+            return
+
+        if ctx.author.id not in self.users_in_db:
+            await ctx.reply(
+                "You cannot rob anyone if you dont have 2500 coins",
+                mention_author=False,
+            )
+            self.rob.reset_cooldown(ctx)
+            return
+
+        user = self.economy[
+            ctx.author.id
+        ]  # user = collection.find_one({"_id": ctx.author.id})
+        user_bal = user["wallet"]
+        target = self.economy[member.id]
+        member_bal = target["wallet"]
+
+        if user_bal >= 2500:
+            number = random.randint(1, 5)
+            if member_bal < 2500:
+                await ctx.reply(
+                    "That user has less than 2500 coins, you cannot rob them",
+                    mention_author=False,
+                )
+                self.rob.reset_cooldown(ctx)
+                return
+            elif member_bal >= 2500:
+                if number == 1:
+                    """if member_bal<=5000:
+                        percentage=random.randint(1,75)
+                    elif member_bal>5000 and member_bal<=10000:
+                        percentage=random.randint(1,50)
+                    elif member_bal>10000 and member_bal<=100000:
+                        percentage=random.randint(1,25)
+                    elif member_bal>100000:
+                        percentage=random.randint(1,10)"""
+                    percentage = get_rob_amount()
+                    max_amount = round(member_bal * percentage / 100)
+                    # stolen_amount = random.randint(50, max_amount)
+                    stolen_amount = max_amount
+                    user_bal += stolen_amount
+                    member_bal -= stolen_amount
+                    await ctx.reply(
+                        f"💸 | You stole ${stolen_amount} off {member}!",
+                        mention_author=False,
+                    )
+                else:
+                    if user_bal <= 50000:
+                        user_bal -= 2500
+                        member_bal += 2500
+                        money_lost = 2500
+                    else:
+                        num = random.randint(5, 15)
+                        user_bal -= round(user_bal * num / 100)
+                        member_bal += round(user_bal * num / 100)
+                        money_lost = round(user_bal * num / 100)
+                    await ctx.reply(
+                        f"You got caught trying to rob {member} so you paid them ${money_lost} to be quiet!",
+                        mention_author=False,
+                    )
+
+            self.economy[ctx.author.id]["wallet"] = user_bal
+            self.economy[member.id]["wallet"] = member_bal
+
+            collection.update_one(
+                {"_id": ctx.author.id}, {"$set": {"wallet": user_bal}}
+            )
+            collection.update_one({"_id": member.id}, {"$set": {"wallet": member_bal}})
+
+        else:
+            await ctx.reply(
+                "You cannot rob anyone if you dont have 2500 coins",
+                mention_author=False,
+            )
+            self.rob.reset_cooldown(ctx)
+
+    @rob.error
+    async def rob_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.reply(
+                f"Woah there, slow down, please try again in {seconds_to_timestr(error.retry_after)}!"
+            )
+        elif isinstance(error, commands.UserNotFound):
+            await ctx.reply("You need to state a valid user to Rob!")
+            self.rob.reset_cooldown(ctx)
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.reply("Please enter a valid member to rob!")
+            self.rob.reset_cooldown(ctx)
+        else:
+            self.rob.reset_cooldown(ctx)
             raise error
 
     # ---------------------------------- Basic economy commands ---------------------------------------
@@ -1348,124 +1466,13 @@ class Economy(commands.Cog):
         lb_string = "\n".join(lb_list[0:5])
 
         embed = discord.Embed(
-            title=lb_titles[item],
+            title=f"{item.capitalize()} Leaderboard"
+            if item not in lb_titles
+            else lb_titles[item],
             description=lb_string,
             color=0xEEE657,
         )
         await ctx.send(embed=embed)
-
-    # ---------------------------------- Risky commands ---------------------------------------
-    @commands.command(aliases=["steal"])
-    @commands.guild_only()
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    async def rob(self, ctx, *, member: discord.User):
-
-        if member.id == ctx.author.id:
-            await ctx.reply("You cannot rob yourself, silly", mention_author=False)
-            self.rob.reset_cooldown(ctx)
-            return
-
-        # if member.bot:
-        # await ctx.reply("You cannot rob a bot!", mention_author=False)
-        # return
-
-        if member.id not in self.users_in_db:
-            await ctx.reply(
-                "That user has less than 2500 coins, you cannot rob them",
-                mention_author=False,
-            )
-            self.rob.reset_cooldown(ctx)
-            return
-
-        if ctx.author.id not in self.users_in_db:
-            await ctx.reply(
-                "You cannot rob anyone if you dont have 2500 coins",
-                mention_author=False,
-            )
-            self.rob.reset_cooldown(ctx)
-            return
-
-        user = self.economy[
-            ctx.author.id
-        ]  # user = collection.find_one({"_id": ctx.author.id})
-        user_bal = user["wallet"]
-        target = self.economy[member.id]
-        member_bal = target["wallet"]
-
-        if user_bal >= 2500:
-            number = random.randint(1, 5)
-            if member_bal < 2500:
-                await ctx.reply(
-                    "That user has less than 2500 coins, you cannot rob them",
-                    mention_author=False,
-                )
-                self.rob.reset_cooldown(ctx)
-                return
-            elif member_bal >= 2500:
-                if number == 1:
-                    """if member_bal<=5000:
-                        percentage=random.randint(1,75)
-                    elif member_bal>5000 and member_bal<=10000:
-                        percentage=random.randint(1,50)
-                    elif member_bal>10000 and member_bal<=100000:
-                        percentage=random.randint(1,25)
-                    elif member_bal>100000:
-                        percentage=random.randint(1,10)"""
-                    percentage = get_rob_amount()
-                    max_amount = round(member_bal * percentage / 100)
-                    # stolen_amount = random.randint(50, max_amount)
-                    stolen_amount = max_amount
-                    user_bal += stolen_amount
-                    member_bal -= stolen_amount
-                    await ctx.reply(
-                        f"💸 | You stole ${stolen_amount} off {member}!",
-                        mention_author=False,
-                    )
-                else:
-                    if user_bal <= 50000:
-                        user_bal -= 2500
-                        member_bal += 2500
-                        money_lost = 2500
-                    else:
-                        num = random.randint(5, 15)
-                        user_bal -= round(user_bal * num / 100)
-                        member_bal += round(user_bal * num / 100)
-                        money_lost = round(user_bal * num / 100)
-                    await ctx.reply(
-                        f"You got caught trying to rob {member} so you paid them ${money_lost} to be quiet!",
-                        mention_author=False,
-                    )
-
-            self.economy[ctx.author.id]["wallet"] = user_bal
-            self.economy[member.id]["wallet"] = member_bal
-
-            collection.update_one(
-                {"_id": ctx.author.id}, {"$set": {"wallet": user_bal}}
-            )
-            collection.update_one({"_id": member.id}, {"$set": {"wallet": member_bal}})
-
-        else:
-            await ctx.reply(
-                "You cannot rob anyone if you dont have 2500 coins",
-                mention_author=False,
-            )
-            self.rob.reset_cooldown(ctx)
-
-    @rob.error
-    async def rob_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
-            await ctx.reply(
-                f"Woah there, slow down, please try again in {seconds_to_timestr(error.retry_after)}!"
-            )
-        elif isinstance(error, commands.UserNotFound):
-            await ctx.reply("You need to state a valid user to Rob!")
-            self.rob.reset_cooldown(ctx)
-        elif isinstance(error, commands.MissingRequiredArgument):
-            await ctx.reply("Please enter a valid member to rob!")
-            self.rob.reset_cooldown(ctx)
-        else:
-            self.rob.reset_cooldown(ctx)
-            raise error
 
     # ---------------------------------- Gambling commands ---------------------------------------
     @commands.command(aliases=["slots"])
