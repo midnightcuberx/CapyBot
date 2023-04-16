@@ -253,9 +253,11 @@ class Economy(commands.Cog):
 
         if amount > 1000:
             amount = 1000
+            await ctx.reply("You are only allowed to shoot 1000 times at once!")
 
         if member.id == ctx.author.id:
             await ctx.reply("Sorry but you are not allowed to commit suicide!")
+            self.murder.reset_cooldown(ctx)
             return
 
         if ctx.author.id not in self.users_in_db:
@@ -278,12 +280,12 @@ class Economy(commands.Cog):
 
         member_info = self.economy[member.id]
 
-        if member_info["wallet"] == 0:
-            await ctx.reply(
-                "You cannot murder someone who doesn't have money!",
-                mention_author=False,
-            )
-            return
+        # if member_info["wallet"] == 0:
+        # await ctx.reply(
+        # "You cannot murder someone who doesn't have money!",
+        # mention_author=False,
+        # )
+        # return
 
         # print(not any(x > 0 for x in [user[i] for i in user if i in self.weapon_type]))
         # return
@@ -355,10 +357,26 @@ class Economy(commands.Cog):
                 member_bal = member_info["wallet"]
                 # pass  # do stuff with member bal and stuff because successful murder
                 if member_info["lifesaver"] >= amount:
-                    member_info["lifesaver"] -= amount
-                    await msg.edit(
-                        content=f"You attempted to kill {member} with a {item} but they survived!"
-                    )
+
+                    chance_2 = random.randint(1, 11)
+
+                    if chance_2 > 3 or member_bal <= 10:
+                        member_info["lifesaver"] -= amount
+                        await msg.edit(
+                            content=f"You attempted to kill {member} with a {item} but they survived!"
+                        )
+                    else:  # steal a tiny amount of money 30% chance x whatever weapon chance
+                        percentage = random.randint(5, 11)
+                        money = round(member_bal * percentage / 100)
+                        await msg.edit(
+                            content=f"You held {member} hostage with a {item} and managed to get a ransom of {money}!"
+                        )
+                        await member.send(
+                            f"You were held hostage by {ctx.author} and you paid them {money} to be set free!"
+                        )
+                        member_info["wallet"] -= money
+                        user["wallet"] += money
+
                     # send member dm maybe and allow to be disabled in economy
                 else:
                     member_info["wallet"] = 0
@@ -366,6 +384,9 @@ class Economy(commands.Cog):
                     user["wallet"] += member_bal
                     await msg.edit(
                         content=f"You successfully killed {member} with a {item} and inherited all their money!"
+                    )
+                    await member.send(
+                        f"You were killed by {ctx.author} and they inherited all your money!"
                     )
 
         collection.update_one(
@@ -424,6 +445,19 @@ class Economy(commands.Cog):
                 mention_author=False,
             )
             self.chew.reset_cooldown(ctx)
+            return
+
+        chance = random.randint(1, 101)
+
+        if chance < 3:  # 2% chance
+            await ctx.reply(
+                "Your bunnies teeth broke attempting to chew curtains!",
+                mention_author=False,
+            )
+            user["bunny"] -= 1
+            collection.update_one(
+                {"_id": ctx.author.id}, {"$set": {"bunny": bunnies - 1}}
+            )
             return
 
         people = [
@@ -492,6 +526,19 @@ class Economy(commands.Cog):
             self.pm.reset_cooldown(ctx)
             return
 
+        chance = random.randint(1, 101)
+
+        if chance < 3:
+            await ctx.reply(
+                "Your laptop broke! Go buy a new one at the shop",
+                mention_author=False,
+            )
+            user["laptop"] -= 1
+            collection.update_one(
+                {"_id": ctx.author.id}, {"$set": {"laptop": user["laptop"]}}
+            )
+            return
+
         memes = ["edgy", "funky", "dank", "repost", "cubing", "corona"]
         chance = random.randint(1, 11)
         if chance > 8:
@@ -545,6 +592,19 @@ class Economy(commands.Cog):
                 mention_author=False,
             )
             # self.fish.reset_cooldown(ctx)
+            return
+
+        chance = random.randint(1, 101)
+
+        if chance < 3:
+            await ctx.reply(
+                "Your rod broke! Go buy a new one at the shop",
+                mention_author=False,
+            )
+            user["rod"] -= 1
+            collection.update_one(
+                {"_id": ctx.author.id}, {"$set": {"rod": user["rod"]}}
+            )
             return
 
         fish = [
@@ -607,6 +667,20 @@ class Economy(commands.Cog):
             )
             self.hunt.reset_cooldown(ctx)
             return
+
+        chance = random.randint(1, 101)
+
+        if chance < 3:
+            await ctx.reply(
+                "Your gun broke! Go buy a new one at the shop",
+                mention_author=False,
+            )
+            user["gun"] -= 1
+            collection.update_one(
+                {"_id": ctx.author.id}, {"$set": {"gun": user["gun"]}}
+            )
+            return
+
         success = random.randint(1, 20)
         if success == 4:
             if user["lifesaver"] < 1:
@@ -1054,6 +1128,13 @@ class Economy(commands.Cog):
                 )
                 return
 
+        # if item == "lifesaver":
+        # if user["lifesaver"] >= 10:
+        # await ctx.reply("The number of lifesavers is capped at 10")
+        # return
+        # if user["lifesaver"] + amount > 10:
+        # amount = 10 - user["lifesaver"]
+        # await ctx.reply("The number of lifesavers is capped at 10")
         if user_bal >= self.itemvalue[item] * amount:
 
             user["wallet"] -= self.itemvalue[item] * amount
