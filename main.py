@@ -7,16 +7,28 @@ import os
 intents = discord.Intents.all()
 bot = commands.Bot(
     # command_prefix=commands.when_mentioned_or("-"),
-    command_prefix=".",
+    command_prefix="-",
     intents=intents,
     help_command=None,
 )
 
 token = os.environ.get("token")
 
+file_list = [
+    "eco.py",
+    "misc.py",
+    "events.py",
+    "owner.py",
+    "setup.py",
+    "tasks.py",
+    "test.py",
+]
+
 
 async def load_cogs():
-    for filename in os.listdir("./cogs"):
+    global file_list
+
+    for filename in file_list:
         if filename.endswith(".py"):
             print(filename)
             await bot.load_extension(f"cogs.{filename[:-3]}")
@@ -135,7 +147,9 @@ async def help(ctx, *, help_type=None):
         elif help_type.lower() == "crime":
             embed.add_field(name="``-rob <user>``", value="rob someone", inline=False)
             embed.add_field(
-                name="``-murder <user>``", value="murder someone", inline=False
+                name="``-murder <user>``",
+                value="murder someone (get all their money if you succeed!)",
+                inline=False,
             )
         elif help_type.lower() == "other":
             embed.add_field(
@@ -151,7 +165,6 @@ async def help(ctx, *, help_type=None):
             )
 
     await ctx.send(embed=embed)
-
 
 
 @bot.command()
@@ -170,13 +183,14 @@ async def shutdown_error(ctx, error):
 @bot.command()
 @commands.is_owner()
 async def reload(ctx, *, file=None):
+    global file_list
     if not file:
-        for filename in os.listdir("./cogs"):
+        for filename in file_list:
             if filename.endswith(".py"):
                 await bot.unload_extension(f"cogs.{filename[:-3]}")
                 await bot.load_extension(f"cogs.{filename[:-3]}")
                 await ctx.send(f"Successfully reloaded {filename}!")
-                return
+        return
 
     await bot.unload_extension(f"cogs.{file}")
     await bot.load_extension(f"cogs.{file}")
@@ -195,6 +209,18 @@ async def load(ctx, extension):
 async def unload(ctx, extension):
     await bot.unload_extension(f"cogs.{extension}")
     await ctx.send(f"Successfully unloaded {extension}.py!")
+
+
+"""@bot.command()
+@commands.is_owner()
+async def eval(ctx, *, string):
+    string = string
+    try:
+        o = await eval(string)
+    except Exception as e:
+        await ctx.reply(e)
+        return
+    await ctx.reply(o)"""
 
 
 """@bot.command()
