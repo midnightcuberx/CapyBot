@@ -2,10 +2,11 @@ import discord
 import pymongo
 import random
 import asyncio
-from discord.ext import commands
-from discord.ext.commands import MemberConverter
 import os
 import math
+from discord.ext import commands
+from .viewclasses import FightView
+from .viewclasses import Challenge
 
 # add code that adds new users
 
@@ -108,7 +109,6 @@ def load_db(economy, users_in_db):
 class Economy(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.converter = MemberConverter()
         self.users_in_db = []  # [u["_id"] for u in users]
         self.economy = {}  # {u["_id"]: u["wallet"] for u in users}
         self.weapon_type = [
@@ -143,6 +143,13 @@ class Economy(commands.Cog):
         for item in user_info:
             if item != "_id":
                 self.economy[member.id][item] = 0
+
+    def process_user(self, member):
+        insert_new_user(collection, member)
+        self.economy[member.id] = {}
+        self.users_in_db.append(member.id)
+        user = get_dict(member)
+        self.update_economy(member, user)
 
     # @commands.Cog.listener()
     # async def on_ready(self):
@@ -230,6 +237,128 @@ class Economy(commands.Cog):
         except Exception as e:
             await ctx.reply(e)
             await ctx.reply("User not in database!")
+
+    # ---------------------------------- Crime commands ---------------------------------------
+    @commands.command()
+    @commands.guild_only()
+    async def fight(self, ctx, member: discord.Member = None, money: int = 0):
+        # def is_member(m):
+        # return m.author == member
+
+        if not member:
+            await ctx.reply("Please enter a valid member!")
+            return
+
+        if member == ctx.author:
+            await ctx.reply("You cannot challenge yourself to a fight!")
+            return
+
+        if ctx.author.id not in self.users_in_db:  # have function for this
+            insert_new_user(collection, ctx.author)
+            self.economy[ctx.author.id] = {}
+            self.users_in_db.append(ctx.author.id)
+            user = get_dict(ctx.author)
+            self.update_economy(ctx.author, user)
+
+        if member.id not in self.users_in_db:
+            insert_new_user(collection, member)
+            self.economy[member.id] = {}
+            self.users_in_db.append(member.id)
+            user = get_dict(member)
+            self.update_economy(member, user)
+
+        user_bal = self.economy[ctx.author.id]["wallet"]
+        member_bal = self.economy[member.id]["wallet"]
+
+        if member_bal < money:
+            await ctx.reply(
+                f"That member doesn't have enough money to accept your challenge!"
+            )
+            return
+        if user_bal < money:
+            await ctx.reply("You don't have enough money to challenge that person!")
+            return
+
+        view = Challenge(member, 30)
+        msg = await ctx.reply(
+            f"{member.mention}, {ctx.author.mention} has challenged you to a fight with ${money}!",
+            view=view,
+        )
+        view.message = msg
+        await view.wait()
+
+        if view.accepted is False:
+            return
+
+        winner = await self.button(ctx, msg, member)
+        loser = ctx.author if winner == member else member
+
+        self.economy[winner.id]["wallet"] += money
+        self.economy[loser.id]["wallet"] -= money
+        collection.update_one(
+            {"_id": winner.id}, {"$set": {"wallet": self.economy[winner.id]["wallet"]}}
+        )
+        collection.update_one(
+            {"_id": loser.id}, {"$set": {"wallet": self.economy[loser.id]["wallet"]}}
+        )
+
+    # @commands.command()
+    async def button(self, ctx, msg, member: discord.User):
+        # view = discord.ui.View()
+        count = 0
+        # user_health = 100
+        # member_health = 100
+        user_health = 100
+        member_health = 100
+
+        # Set up view and basic stuff
+        view = FightView(ctx.author, timeout=10)
+        msg = await msg.edit(content=f"{ctx.author}'s turn", view=view)
+        view.message = msg
+        await view.wait()
+        member_health -= view.damage
+        button_pressed = view.button_pressed
+
+        while button_pressed and user_health > 0 and member_health > 0:
+            if count % 2 == 0:
+                view = FightView(member, timeout=10)
+                msg = await msg.edit(
+                    content=f"**{member}'s turn**\n{ctx.author}'s health: {user_health}\n{member}'s health: {member_health}",
+                    view=view,
+                )
+            else:
+                view = FightView(ctx.author, timeout=10)
+                msg = await msg.edit(
+                    content=f"**{ctx.author}'s turn**\n{ctx.author}'s health: {user_health}\n{member}'s health: {member_health}",
+                    view=view,
+                )
+
+            view.message = msg
+            await view.wait()
+
+            if count % 2 == 0:
+                user_health -= view.damage
+            else:
+                member_health -= view.damage
+
+            button_pressed = view.button_pressed
+            count += 1
+
+        if button_pressed is False:
+            winner = ctx.author if count % 2 == 1 else member
+        else:
+            winner = ctx.author if user_health > 0 else member  # doesnt work if runaway
+
+        await msg.edit(
+            content=f"**{ctx.author} vs {member}**\n{winner.mention} won in {math.ceil((count+1)/2)} round(s)!"
+        )
+
+        return winner
+
+        # button = discord.ui.Button(label="Click me")
+        # view.add_item(button)
+        # if view.button_pressed is None:
+        # await ctx.send("timeout!")
 
     # ---------------------------------- Crime commands ---------------------------------------
 
@@ -375,10 +504,10 @@ class Economy(commands.Cog):
                         percentage = random.randint(5, 11)
                         money = round(member_bal * percentage / 100)
                         await msg.edit(
-                            content=f"You held {member} hostage with a {item} and managed to get a ransom of {money}!"
+                            content=f"You held {member} hostage with a {item} and managed to get a ransom of ${money}!"
                         )
                         await member.send(
-                            f"You were held hostage by {ctx.author} and you paid them {money} to be set free!"
+                            f"You were held hostage by {ctx.author} and you paid them ${money} to be set free!"
                         )
                         member_info["wallet"] -= money
                         user["wallet"] += money
