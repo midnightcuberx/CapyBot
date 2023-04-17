@@ -57,7 +57,9 @@ class Challenge(discord.ui.View):
         await self.message.edit(view=self)
 
     async def on_timeout(self):
-        await self.message.channel.send(f"{self.author} declined your challenge!")
+        await self.message.channel.send(
+            f"{self.author} declined your challenge by timeout!"
+        )
         await self.disable_all_items()
 
     async def interaction_check(self, interaction: discord.Interaction):
