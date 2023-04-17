@@ -7,7 +7,7 @@ import os
 intents = discord.Intents.all()
 bot = commands.Bot(
     # command_prefix=commands.when_mentioned_or("-"),
-    command_prefix="-",
+    command_prefix="!",
     intents=intents,
     help_command=None,
 )
