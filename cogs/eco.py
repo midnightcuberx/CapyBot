@@ -7,6 +7,7 @@ import math
 from discord.ext import commands
 from .viewclasses import FightView
 from .viewclasses import Challenge
+from .testy import button
 
 # add code that adds new users
 
@@ -191,11 +192,7 @@ class Economy(commands.Cog):
             return
 
         if member.id not in self.users_in_db:
-            insert_new_user(collection, member)
-            self.economy[member.id] = {}
-            self.users_in_db.append(member.id)
-            user = get_dict(member)
-            self.update_economy(member, user)
+            self.process_user(member)
 
         collection.update_one({"_id": member.id}, {"$set": {thing: amount}})
         self.economy[member.id][thing] = amount
@@ -211,11 +208,7 @@ class Economy(commands.Cog):
             return
 
         if member.id not in self.users_in_db:
-            insert_new_user(collection, member)
-            self.economy[member.id] = {}
-            self.users_in_db.append(member.id)
-            user = get_dict(member)
-            self.update_economy(member, user)
+            self.process_user(member)
 
         collection.update_one(
             {"_id": member.id},
@@ -254,22 +247,17 @@ class Economy(commands.Cog):
             return
 
         if ctx.author.id not in self.users_in_db:  # have function for this
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
         if member.id not in self.users_in_db:
-            insert_new_user(collection, member)
-            self.economy[member.id] = {}
-            self.users_in_db.append(member.id)
-            user = get_dict(member)
-            self.update_economy(member, user)
+            self.process_user(member)
 
         user_bal = self.economy[ctx.author.id]["wallet"]
         member_bal = self.economy[member.id]["wallet"]
 
+        if money < 0:
+            await ctx.reply("You cannot challenge someone with negative money!")
+            return
         if member_bal < money:
             await ctx.reply(
                 f"That member doesn't have enough money to accept your challenge!"
@@ -282,6 +270,7 @@ class Economy(commands.Cog):
         view = Challenge(member, 30)
         msg = await ctx.reply(
             f"{member.mention}, {ctx.author.mention} has challenged you to a fight with ${money}!",
+            mention_author=False,
             view=view,
         )
         view.message = msg
@@ -290,75 +279,28 @@ class Economy(commands.Cog):
         if view.accepted is False:
             return
 
-        winner = await self.button(ctx, msg, member)
+        winner = await button(ctx, msg, member)
         loser = ctx.author if winner == member else member
 
-        self.economy[winner.id]["wallet"] += money
-        self.economy[loser.id]["wallet"] -= money
-        collection.update_one(
-            {"_id": winner.id}, {"$set": {"wallet": self.economy[winner.id]["wallet"]}}
-        )
-        collection.update_one(
-            {"_id": loser.id}, {"$set": {"wallet": self.economy[loser.id]["wallet"]}}
-        )
+        if money > 0:
+            self.economy[winner.id]["wallet"] += money
+            self.economy[loser.id]["wallet"] -= money
+
+            collection.update_one(
+                {"_id": winner.id},
+                {"$set": {"wallet": self.economy[winner.id]["wallet"]}},
+            )
+            collection.update_one(
+                {"_id": loser.id},
+                {"$set": {"wallet": self.economy[loser.id]["wallet"]}},
+            )
 
     # @commands.command()
-    async def button(self, ctx, msg, member: discord.User):
-        # view = discord.ui.View()
-        count = 0
-        # user_health = 100
-        # member_health = 100
-        user_health = 100
-        member_health = 100
 
-        # Set up view and basic stuff
-        view = FightView(ctx.author, timeout=10)
-        msg = await msg.edit(content=f"{ctx.author}'s turn", view=view)
-        view.message = msg
-        await view.wait()
-        member_health -= view.damage
-        button_pressed = view.button_pressed
-
-        while button_pressed and user_health > 0 and member_health > 0:
-            if count % 2 == 0:
-                view = FightView(member, timeout=10)
-                msg = await msg.edit(
-                    content=f"**{member}'s turn**\n{ctx.author}'s health: {user_health}\n{member}'s health: {member_health}",
-                    view=view,
-                )
-            else:
-                view = FightView(ctx.author, timeout=10)
-                msg = await msg.edit(
-                    content=f"**{ctx.author}'s turn**\n{ctx.author}'s health: {user_health}\n{member}'s health: {member_health}",
-                    view=view,
-                )
-
-            view.message = msg
-            await view.wait()
-
-            if count % 2 == 0:
-                user_health -= view.damage
-            else:
-                member_health -= view.damage
-
-            button_pressed = view.button_pressed
-            count += 1
-
-        if button_pressed is False:
-            winner = ctx.author if count % 2 == 1 else member
-        else:
-            winner = ctx.author if user_health > 0 else member  # doesnt work if runaway
-
-        await msg.edit(
-            content=f"**{ctx.author} vs {member}**\n{winner.mention} won in {math.ceil((count+1)/2)} round(s)!"
-        )
-
-        return winner
-
-        # button = discord.ui.Button(label="Click me")
-        # view.add_item(button)
-        # if view.button_pressed is None:
-        # await ctx.send("timeout!")
+    # button = discord.ui.Button(label="Click me")
+    # view.add_item(button)
+    # if view.button_pressed is None:
+    # await ctx.send("timeout!")
 
     # ---------------------------------- Crime commands ---------------------------------------
 
@@ -396,23 +338,13 @@ class Economy(commands.Cog):
             return
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-
-        else:
-            user = self.economy[ctx.author.id]
+            self.process_user(ctx.author)
 
         # If member not in
         if member.id not in self.users_in_db:
-            await ctx.reply(
-                "You cannot murder someone who doesn't have money!",
-                mention_author=False,
-            )
-            return
+            self.process_user(member)
 
+        user = self.economy[ctx.author.id]
         member_info = self.economy[member.id]
 
         # if member_info["wallet"] == 0:
@@ -674,14 +606,9 @@ class Economy(commands.Cog):
     async def chew(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        else:
-            user = self.economy[ctx.author.id]
+        user = self.economy[ctx.author.id]
 
         user_bal = user["wallet"]
         bunnies = user["bunny"]
@@ -751,17 +678,9 @@ class Economy(commands.Cog):
     async def pm(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
-
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
         laptops = user["laptop"]
 
@@ -822,15 +741,9 @@ class Economy(commands.Cog):
     async def fish(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        user = self.economy[
-            ctx.author.id
-        ]  # user = collection.find_one({"_id": ctx.author.id})
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
 
         if user["rod"] < 1:
@@ -896,15 +809,9 @@ class Economy(commands.Cog):
     async def hunt(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        user = self.economy[
-            ctx.author.id
-        ]  # user = collection.find_one({"_id": ctx.author.id})
+        user = self.economy[ctx.author.id]
         user_guns = user["gun"]
 
         if user_guns < 1:
@@ -988,15 +895,9 @@ class Economy(commands.Cog):
             money = random.randint(50, 100)
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
+
+        user = self.economy[ctx.author.id]
 
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
@@ -1029,17 +930,11 @@ class Economy(commands.Cog):
     async def beg(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
 
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
+
         chance = random.randint(1, 11)
         if chance == 1:
             money = random.randint(100, 201)
@@ -1072,15 +967,9 @@ class Economy(commands.Cog):
     async def work(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
+
+        user = self.economy[ctx.author.id]
 
         money = random.randint(160, 1000)
         user_bal = user["wallet"] + money
@@ -1136,15 +1025,9 @@ class Economy(commands.Cog):
     async def search(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
+
+        user = self.economy[ctx.author.id]
 
         places = [
             "the dump",
@@ -1199,17 +1082,11 @@ class Economy(commands.Cog):
     async def daily(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
 
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"] + 20000
+
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
         self.economy[ctx.author.id]["wallet"] += 20000
@@ -1237,17 +1114,11 @@ class Economy(commands.Cog):
     async def hourly(self, ctx):
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
 
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"] + 1000
+
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
         self.economy[ctx.author.id]["wallet"] += 1000
@@ -1347,16 +1218,9 @@ class Economy(commands.Cog):
             return
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        user = self.economy[
-            ctx.author.id
-        ]  # collection.find_one({"_id": ctx.author.id})
-
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
 
         try:
@@ -1421,15 +1285,9 @@ class Economy(commands.Cog):
             return
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
+            self.process_user(ctx.author)
 
-        user = self.economy[
-            ctx.author.id
-        ]  # user = collection.find_one({"_id": ctx.author.id})
+        user = self.economy[ctx.author.id]
 
         try:
             amount = int(amount)
@@ -1615,16 +1473,9 @@ class Economy(commands.Cog):
             return
 
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
 
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
 
         if user_bal < money:
@@ -1686,19 +1537,12 @@ class Economy(commands.Cog):
             return
 
         success = random.randint(1, 3)
-
         if ctx.author.id not in self.users_in_db:
-            insert_new_user(collection, ctx.author)
-            self.economy[ctx.author.id] = {}
-            self.users_in_db.append(ctx.author.id)
-            user = get_dict(ctx.author)
-            self.update_economy(ctx.author, user)
-        else:
-            user = self.economy[
-                ctx.author.id
-            ]  # user = collection.find_one({"_id": ctx.author.id})
+            self.process_user(ctx.author)
 
+        user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
+
         if money > user_bal or money > 100000:
             if money > 100000:
                 money = 100000
@@ -1793,15 +1637,9 @@ class Economy(commands.Cog):
         ]  # user = collection.find_one({"_id": ctx.author.id})
 
         if member.id not in self.users_in_db:
-            insert_new_user(collection, member)
-            self.economy[member.id] = {}
-            self.economy[member.id]["wallet"] = 0
-            self.users_in_db.append(member.id)
-            target = get_dict(member)
-            self.update_economy(member, user)
-        else:
-            target = self.economy[member.id]
+            self.process_user(member)
 
+        target = self.economy[member.id]
         user_bal = user["wallet"]
         member_bal = target["wallet"]
 
@@ -1964,11 +1802,7 @@ class Economy(commands.Cog):
         # user_max = 0
 
         if member.id not in self.users_in_db:
-            insert_new_user(collection, member)
-            self.economy[member.id] = {}
-            self.users_in_db.append(member.id)
-            user = get_dict(member)
-            self.update_economy(member, user)
+            self.process_user(member)
 
         user = self.economy[member.id]
         user_bal = user["wallet"]
