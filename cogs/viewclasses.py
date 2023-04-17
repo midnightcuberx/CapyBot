@@ -26,9 +26,16 @@ class FightView(discord.ui.View):
     # creates a button when pressed you send message
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
     async def hit(self, interaction: discord.Interaction, button: discord.ui.Button):
-        chance = random.randint(1, 11)
-        if chance != 1:
-            self.damage = random.randint(1, 11)
+        chance = random.randint(1, 100)
+        if chance == 1:
+            self.damage = 100
+        elif chance > 1 and chance < 7:
+            self.damage = random.randint(40, 70)
+        elif chance > 90:
+            self.damage = random.randint(30, 50)
+        else:
+            self.damage = random.randint(1, 20)
+
         await interaction.response.send_message(
             f"You dealt {self.damage} damage to your opponent!", ephemeral=True
         )
