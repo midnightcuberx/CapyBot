@@ -8,6 +8,14 @@ from discord.ext import commands
 from .viewclasses import FightView
 from .viewclasses import Challenge
 from .testy import button
+from .blackjack import BlackJack
+from .blackjack import get_starting_cards
+from .blackjack import get_starting_score
+from .blackjack import get_dealer_score
+from .blackjack import ace_filter
+from .blackjack import run_bj
+from .blackjack import is_blackjack
+from .blackjack import get_result
 
 # add code that adds new users
 
@@ -57,7 +65,6 @@ def get_max_bank(user_obj):
 
 
 def get_rob_amount():
-
     chance = random.randint(1, 501)
 
     if chance == 1:  # 0.2 %
@@ -99,6 +106,7 @@ def load_db(economy, users_in_db):
     for u in users:
         users_in_db.append(u["_id"])
         economy[u["_id"]] = {}
+        # economy[u["_id"]]["fighting"] = False
         for item in u:
             if item != "_id":
                 economy[u["_id"]][item] = u[item]
@@ -151,6 +159,9 @@ class Economy(commands.Cog):
         self.users_in_db.append(member.id)
         user = get_dict(member)
         self.update_economy(member, user)
+
+    """def is_fighting(self, member):
+        return self.economy[member.id]["fighting"]"""
 
     # @commands.Cog.listener()
     # async def on_ready(self):
@@ -220,7 +231,6 @@ class Economy(commands.Cog):
     @commands.command(aliases=["purge"])
     @commands.is_owner()
     async def delete(self, ctx, member: discord.User):
-
         try:
             collection.delete_one({"_id": member.id})
             self.users_in_db.remove(member.id)
@@ -234,16 +244,24 @@ class Economy(commands.Cog):
     # ---------------------------------- Crime commands ---------------------------------------
     @commands.command()
     @commands.guild_only()
+    @commands.cooldown(1, 10, commands.BucketType.user)
     async def fight(self, ctx, member: discord.Member = None, money: int = 0):
         # def is_member(m):
         # return m.author == member
 
         if not member:
             await ctx.reply("Please enter a valid member!")
+            self.fight.reset_cooldown(ctx)
+            return
+
+        if member.bot:
+            await ctx.reply("You cannot challenge a bot!")
+            self.fight.reset_cooldown(ctx)
             return
 
         if member == ctx.author:
             await ctx.reply("You cannot challenge yourself to a fight!")
+            self.fight.reset_cooldown(ctx)
             return
 
         if ctx.author.id not in self.users_in_db:  # have function for this
@@ -254,18 +272,30 @@ class Economy(commands.Cog):
 
         user_bal = self.economy[ctx.author.id]["wallet"]
         member_bal = self.economy[member.id]["wallet"]
+        # self.economy[ctx.author.id]["fighting"] = True
+        # self.economy[member.id]["fighting"] = True
 
         if money < 0:
-            await ctx.reply("You cannot challenge someone with negative money!")
+            await ctx.reply(
+                "You cannot challenge someone with negative money!"
+            )
+            self.fight.reset_cooldown(ctx)
             return
         if member_bal < money:
             await ctx.reply(
                 f"That member doesn't have enough money to accept your challenge!"
             )
+            self.fight.reset_cooldown(ctx)
             return
         if user_bal < money:
-            await ctx.reply("You don't have enough money to challenge that person!")
+            await ctx.reply(
+                "You don't have enough money to challenge that person!"
+            )
+            self.fight.reset_cooldown(ctx)
             return
+
+        self.economy[member.id]["wallet"] -= money
+        self.economy[ctx.author.id]["wallet"] -= money
 
         view = Challenge(member, 30)
         msg = await ctx.reply(
@@ -277,14 +307,18 @@ class Economy(commands.Cog):
         await view.wait()
 
         if view.accepted is False:
+            # self.economy[ctx.author.id]["fighting"] = False
+            # self.economy[member.id]["fighting"] = False
+            self.economy[ctx.author.id]["wallet"] += money
+            self.economy[member.id]["wallet"] += money
             return
 
         winner = await button(ctx, msg, member)
         loser = ctx.author if winner == member else member
 
         if money > 0:
-            self.economy[winner.id]["wallet"] += money
-            self.economy[loser.id]["wallet"] -= money
+            self.economy[winner.id]["wallet"] += 2 * money
+            # self.economy[loser.id]["wallet"] -= money
 
             collection.update_one(
                 {"_id": winner.id},
@@ -294,6 +328,21 @@ class Economy(commands.Cog):
                 {"_id": loser.id},
                 {"$set": {"wallet": self.economy[loser.id]["wallet"]}},
             )
+
+    @fight.error
+    async def fight_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.reply(
+                f"Woah there, slow down, please try again in {seconds_to_timestr(error.retry_after)}!"
+            )
+            return
+        elif isinstance(error, commands.BadArgument):
+            await ctx.reply("Please enter a valid user or amount of money!")
+            self.fight.reset_cooldown(ctx)
+            return
+        else:
+            self.fight.reset_cooldown(ctx)
+            raise error
 
     # @commands.command()
 
@@ -311,9 +360,11 @@ class Economy(commands.Cog):
 
     @commands.command(aliases=["kill"])
     @commands.guild_only()
+    #@commands.is_owner()
     @commands.cooldown(1, 120, commands.BucketType.user)
-    async def murder(self, ctx, member: discord.Member = None, amount: int = 1):
-
+    async def murder(
+        self, ctx, member: discord.Member = None, amount: int = 1
+    ):
         murder_dict = {
             "knife": "stab",
             "shuriken": "throw a shuriken at",
@@ -323,14 +374,17 @@ class Economy(commands.Cog):
 
         if not member:
             await ctx.reply(
-                "Please try to enter a valid member to murder!", mention_author=False
+                "Please try to enter a valid member to murder!",
+                mention_author=False,
             )
             self.murder.reset_cooldown(ctx)
             return
 
         if amount > 1000:
             amount = 1000
-            await ctx.reply("You are only allowed to shoot 1000 times at once!")
+            await ctx.reply(
+                "You are only allowed to shoot 1000 times at once!"
+            )
 
         if member.id == ctx.author.id:
             await ctx.reply("Sorry but you are not allowed to commit suicide!")
@@ -356,7 +410,9 @@ class Economy(commands.Cog):
 
         # print(not any(x > 0 for x in [user[i] for i in user if i in self.weapon_type]))
         # return
-        if not any(x > 0 for x in [user[i] for i in user if i in self.weapon_type]):
+        if not any(
+            x > 0 for x in [user[i] for i in user if i in self.weapon_type]
+        ):
             await ctx.reply(
                 "You need a weapon to kill people! Go purchase one at the shop.",
                 mention_author=False,
@@ -394,7 +450,8 @@ class Economy(commands.Cog):
         print(chance)
 
         msg = await ctx.reply(
-            f"Attempting to {murder_dict[item]} {member}...", mention_author=False
+            f"Attempting to {murder_dict[item]} {member}...",
+            mention_author=False,
         )
         await asyncio.sleep(3)
 
@@ -424,7 +481,6 @@ class Economy(commands.Cog):
                 member_bal = member_info["wallet"]
                 # pass  # do stuff with member bal and stuff because successful murder
                 if member_info["lifesaver"] >= amount:
-
                     chance_2 = random.randint(1, 11)
 
                     if chance_2 > 3 or member_bal <= 10:
@@ -488,12 +544,14 @@ class Economy(commands.Cog):
             raise error
 
     @commands.command(aliases=["steal"])
+    #@commands.is_owner()
     @commands.guild_only()
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def rob(self, ctx, *, member: discord.User):
-
         if member.id == ctx.author.id:
-            await ctx.reply("You cannot rob yourself, silly", mention_author=False)
+            await ctx.reply(
+                "You cannot rob yourself, silly", mention_author=False
+            )
             self.rob.reset_cooldown(ctx)
             return
 
@@ -574,7 +632,9 @@ class Economy(commands.Cog):
             collection.update_one(
                 {"_id": ctx.author.id}, {"$set": {"wallet": user_bal}}
             )
-            collection.update_one({"_id": member.id}, {"$set": {"wallet": member_bal}})
+            collection.update_one(
+                {"_id": member.id}, {"$set": {"wallet": member_bal}}
+            )
 
         else:
             await ctx.reply(
@@ -604,7 +664,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 600, commands.BucketType.user)
     async def chew(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -655,7 +714,8 @@ class Economy(commands.Cog):
         total = user_bal + money
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": total, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": total, "maxbank": max_bank}},
         )
         await ctx.reply(
             f"Someone paid you ${money} to vandalise their {random.choice(people)}'s curtains!",
@@ -676,7 +736,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 120, commands.BucketType.user)
     async def pm(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -718,7 +777,8 @@ class Economy(commands.Cog):
         total = user_bal + money
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": total, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": total, "maxbank": max_bank}},
         )
         await ctx.reply(
             f"You posted a {random.choice(memes)} meme and earned ${money}!",
@@ -739,7 +799,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 60, commands.BucketType.user)
     async def fish(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -807,7 +866,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 600, commands.BucketType.user)
     async def hunt(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -842,7 +900,9 @@ class Economy(commands.Cog):
                     "You were shot while hunting and you didnt have a lifesaver so you died!",
                     mention_author=False,
                 )
-                collection.update_one({"_id": ctx.author.id}, {"$set": {"wallet": 0}})
+                collection.update_one(
+                    {"_id": ctx.author.id}, {"$set": {"wallet": 0}}
+                )
                 return
 
             else:
@@ -883,7 +943,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 60, commands.BucketType.user)
     async def busk(self, ctx):
-
         luck = random.randint(1, 60)
 
         if luck > 30:
@@ -928,7 +987,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def beg(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -947,9 +1005,12 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] += money
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
-        await ctx.reply(f"You begged and earned ${money}", mention_author=False)
+        await ctx.reply(
+            f"You begged and earned ${money}", mention_author=False
+        )
 
     @beg.error
     async def beg_error(self, ctx, error):
@@ -965,7 +1026,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 900, commands.BucketType.user)
     async def work(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -978,7 +1038,8 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] += money
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
 
         jobs = [
@@ -1023,7 +1084,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def search(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -1057,7 +1117,8 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] += money
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
         await ctx.reply(
             f"You scouted {random.choice(places)} and found ${money}!",
@@ -1080,7 +1141,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 86400, commands.BucketType.user)
     async def daily(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -1092,10 +1152,12 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] += 20000
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
         await ctx.reply(
-            "You successfully collected your 20000 daily coins!", mention_author=False
+            "You successfully collected your 20000 daily coins!",
+            mention_author=False,
         )
 
     @daily.error
@@ -1112,7 +1174,6 @@ class Economy(commands.Cog):
     @commands.guild_only()
     @commands.cooldown(1, 3600, commands.BucketType.user)
     async def hourly(self, ctx):
-
         if ctx.author.id not in self.users_in_db:
             self.process_user(ctx.author)
 
@@ -1124,10 +1185,12 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] += 1000
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
         await ctx.reply(
-            "You successfully collected your 1000 hourly coins!", mention_author=False
+            "You successfully collected your 1000 hourly coins!",
+            mention_author=False,
         )
 
     @hourly.error
@@ -1167,7 +1230,9 @@ class Economy(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Capybara- $1000000000", value="Collectable plushie", inline=False
+            name="Capybara- $1000000000",
+            value="Collectable plushie",
+            inline=False,
         )
         embed.add_field(
             name="Bunny- $100000",
@@ -1175,7 +1240,9 @@ class Economy(commands.Cog):
             inline=False,
         )
         embed.add_field(
-            name="Bullet- $750", value="You need this to shoot people", inline=False
+            name="Bullet- $750",
+            value="You need this to shoot people",
+            inline=False,
         )
         embed.add_field(
             name="Knife- $1000",
@@ -1228,16 +1295,23 @@ class Economy(commands.Cog):
         except ValueError:
             if amount.lower() == "all" or amount.lower() == "max":
                 amount = user_bal // self.itemvalue[item]
-                if amount == 0:
+                if amount <= 0:
                     await ctx.reply(
-                        "Sorry, you do not have enough money.", mention_author=False
+                        "Sorry, you do not have enough money.",
+                        mention_author=False,
                     )
                     return
             else:
                 await ctx.reply(
-                    f"Please enter a valid number of {item}(s)!", mention_author=False
+                    f"Please enter a valid number of {item}(s)!",
+                    mention_author=False,
                 )
                 return
+        if amount < 1:
+            await ctx.reply(
+                "You cannot buy 0 or negative items!", mention_author=False
+            )
+            return
 
         # if item == "lifesaver":
         # if user["lifesaver"] >= 10:
@@ -1247,7 +1321,6 @@ class Economy(commands.Cog):
         # amount = 10 - user["lifesaver"]
         # await ctx.reply("The number of lifesavers is capped at 10")
         if user_bal >= self.itemvalue[item] * amount:
-
             user["wallet"] -= self.itemvalue[item] * amount
             user[item] += amount
             # self.economy[ctx.author.id]["wallet"] -= itemvalue[item] * amount
@@ -1258,7 +1331,8 @@ class Economy(commands.Cog):
                 {"$set": {"wallet": user["wallet"], item: user[item]}},
             )
             await ctx.reply(
-                f"You successfully bought {amount} {item}(s)!", mention_author=False
+                f"You successfully bought {amount} {item}(s)!",
+                mention_author=False,
             )
         else:
             await ctx.reply(
@@ -1268,7 +1342,6 @@ class Economy(commands.Cog):
     @commands.command()
     @commands.guild_only()
     async def sell(self, ctx, item=None, amount=None):
-
         if not item:
             await ctx.reply("Please enter a valid item!", mention_author=False)
             return
@@ -1296,7 +1369,8 @@ class Economy(commands.Cog):
                 amount = user[item]
                 if amount == 0:
                     await ctx.reply(
-                        f"You do not have enough of {item}!", mention_author=False
+                        f"You do not have enough of {item}!",
+                        mention_author=False,
                     )
                     return
             else:
@@ -1315,15 +1389,17 @@ class Economy(commands.Cog):
                 {"$set": {"wallet": user["wallet"], item: user[item]}},
             )
             await ctx.reply(
-                f"You successfully sold {amount} {item}(s)!", mention_author=False
+                f"You successfully sold {amount} {item}(s)!",
+                mention_author=False,
             )
         else:
-            await ctx.reply(f"You do not have enough of {item}!", mention_author=False)
+            await ctx.reply(
+                f"You do not have enough of {item}!", mention_author=False
+            )
 
     @commands.command(aliases=["inventory"])
     @commands.guild_only()
     async def inv(self, ctx):
-
         items = [key for key in self.itemvalue]
         user_item_amount = {}
         user_item_list = []
@@ -1334,7 +1410,9 @@ class Economy(commands.Cog):
                 if ctx.author.id not in self.users_in_db
                 else self.economy[ctx.author.id][item]
             )
-            user_item_list.append(f"{item.capitalize()}(s): {user_item_amount[item]}")
+            user_item_list.append(
+                f"{item.capitalize()}(s): {user_item_amount[item]}"
+            )
 
         embed = discord.Embed(
             title=f"{ctx.author}'s inventory",
@@ -1350,7 +1428,6 @@ class Economy(commands.Cog):
     @commands.command(aliases=["leaderboard", "lb"])
     @commands.guild_only()
     async def rich(self, ctx, *, item="wallet"):
-
         lb_titles = {
             "wallet": "💰Top 5 richest users💰",
             "net worth": "💰Top 5 richest users💰",
@@ -1375,7 +1452,11 @@ class Economy(commands.Cog):
 
         item = item.lower()
 
-        if item not in get_dict(ctx.author) and item != "net worth" or item == "_id":
+        if (
+            item not in get_dict(ctx.author)
+            and item != "net worth"
+            or item == "_id"
+        ):
             await ctx.reply("Please enter a valid item!", mention_author=False)
             return
 
@@ -1393,7 +1474,9 @@ class Economy(commands.Cog):
         if item != "net worth":
             for u in range(len(users)):
                 user_bal = self.economy[users[u].id][item]
-                user_balances[f"{users[u].name}#{users[u].discriminator}"] = user_bal
+                user_balances[
+                    f"{users[u].name}#{users[u].discriminator}"
+                ] = user_bal
 
         else:
             for u in range(len(users)):
@@ -1401,11 +1484,16 @@ class Economy(commands.Cog):
                 for i in get_dict(ctx.author):
                     if i != "_id" and i != "maxbank":
                         if i in self.itemvalue:
-                            user_bal += self.economy[users[u].id][i] * self.itemvalue[i]
+                            user_bal += (
+                                self.economy[users[u].id][i]
+                                * self.itemvalue[i]
+                            )
                         else:
                             user_bal += self.economy[users[u].id][i]
 
-                user_balances[f"{users[u].name}#{users[u].discriminator}"] = user_bal
+                user_balances[
+                    f"{users[u].name}#{users[u].discriminator}"
+                ] = user_bal
 
         length = len(user_balances)
         if length > 5:
@@ -1462,14 +1550,144 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed)
 
     # ---------------------------------- Gambling commands ---------------------------------------
+    @commands.command(aliases=["bj"])
+    @commands.guild_only()
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def blackjack(self, ctx, money=None):
+        
+        MAX_GAMBLE = 500000
+        
+        if not money:
+            money = 0
+
+        if ctx.author.id not in self.users_in_db:
+            self.process_user(ctx.author)
+
+        user = self.economy[ctx.author.id]
+        user_bal = user["wallet"]
+        
+        try:
+            money = int(money)
+        except ValueError:
+            if money.lower() == "max" or money.lower() == "all":
+                money = min(user_bal, MAX_GAMBLE)
+            else:
+                self.blackjack.reset_cooldown(ctx)
+                await ctx.reply("You must enter a valid amount of money!", mention_author=False)
+                return
+                
+        if user_bal < money:
+            self.blackjack.reset_cooldown(ctx)
+            await ctx.reply(
+                "You cannot gamble more than you have!", mention_author=False
+            )
+            return
+        
+        if money < 0:
+            self.blackjack.reset_cooldown(ctx)
+            await ctx.reply("You cannot gamble negative money!", mention_author=False)
+            return
+
+        if money > MAX_GAMBLE:
+            money = MAX_GAMBLE
+            await ctx.reply(f"You can only gamble ${MAX_GAMBLE}", mention_author=False)
+            
+            
+        win_rate = {"W": 1, "D": 0, "L": -1, "BJ": 1.5}
+        possible_cards = {str(i): i for i in range(2, 11)} | {
+            "J": 10,
+            "Q": 10,
+            "K": 10,
+            "A": 11,
+        }
+
+        card_1, card_2 = get_starting_cards(possible_cards)
+        score = get_starting_score(possible_cards, card_1, card_2)
+        player_hand = [card_1, card_2]
+        dealer_card_1, dealer_card_2 = get_starting_cards(possible_cards)
+        dealer_hand = [dealer_card_1, dealer_card_2]
+
+        embed = discord.Embed(
+            title=f"Capsino: ${money}",
+            description=f"**Your Hand**: [{' '.join(player_hand)}] ({score})\n**Dealers Hand**: [{dealer_hand[0]} ?]",
+            color=0xFFFF00,
+        )
+
+        msg = await ctx.reply(embed=embed)
+
+        bj = BlackJack(ctx.author)
+        bj.hit = True
+
+        while score < 21 and bj.hit:
+
+            bj = BlackJack(ctx.author)
+            msg = await msg.edit(view=bj)
+            bj.message = msg
+            await bj.wait()
+
+            if bj.hit or bj.double:
+                score = run_bj(possible_cards, player_hand, score)
+                embed = discord.Embed(
+                    title=f"Capsino ${money}",
+                    description=f"**Your Hand**: [{' '.join(player_hand)}] ({score})\n**Dealers Hand**: [{dealer_hand[0]} ?]",
+                    color=0xFFFF00,
+                )
+                msg = await msg.edit(embed=embed, view=bj)
+
+        dealer_hand, dealer_score = get_dealer_score(possible_cards, dealer_hand)
+        dealer_msg = f"**Dealer Hand**: [{' '.join(dealer_hand)}] ({dealer_score})"
+        result = get_result(player_hand, score, dealer_hand, dealer_score)
+
+        multiplier = win_rate[result] if not bj.double else win_rate[result] * 2
+        if result == "L" and bj.double:
+            multiplier = -1
+        amount = round(multiplier * money)
+        user_bal += amount
+
+        self.economy[ctx.author.id]["wallet"] = user_bal
+        max_bank = get_max_bank(user)
+        self.economy[ctx.author.id]["maxbank"] = max_bank
+
+        collection.update_one(
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
+        )
+
+        if result == "W" or result == "BJ":
+            title = f"Capsino: {ctx.author} won ${money}!"
+        elif result == "D":
+            title = "Capsino: Draw!"
+        else:
+            title = f"Capsino: Dealer wins ${money}!"
+
+        embed = discord.Embed(
+            title=title,
+            description=f"**Your Hand**: [{' '.join(player_hand)}] ({score})\n{dealer_msg}",
+            color=0xFFFF00,
+        )
+        await msg.edit(embed=embed)
+
+    @blackjack.error
+    async def blackjack_error(self, ctx, error):
+        if isinstance(error, commands.CommandOnCooldown):
+            await ctx.reply(
+                f"Woah there, slow down, please try again in {seconds_to_timestr(error.retry_after)}!"
+            )
+        else:
+            self.blackjack.reset_cooldown(ctx)
+            raise error
+
+
     @commands.command(aliases=["slots"])
     @commands.guild_only()
     @commands.cooldown(1, 60, commands.BucketType.user)
-    async def gamble(self, ctx, money: int = None):
+    async def gamble(self, ctx, money=None):
         success = random.randint(1, 4)
         if not money:
             self.gamble.reset_cooldown(ctx)
-            await ctx.reply("Please specify an amount to gamble!", mention_author=False)
+            await ctx.reply(
+                "Please specify an amount to gamble!", mention_author=False
+            )
             return
 
         if ctx.author.id not in self.users_in_db:
@@ -1477,6 +1695,16 @@ class Economy(commands.Cog):
 
         user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
+
+        try:
+            money = int(money)
+        except ValueError:
+            if money.lower() == "max" or money.lower() == "all":
+                money = user_bal
+            else:
+                await self.gamble.reset_cooldown(ctx)
+                await ctx.reply("You must enter a valid amount of money!", mention_author=False)
+                return
 
         if user_bal < money:
             await ctx.reply(
@@ -1496,19 +1724,25 @@ class Economy(commands.Cog):
             if multiplier == 500 or multiplier == 69:
                 money *= 10
             user_bal += money
+            self.economy[ctx.author.id]["wallet"] = user_bal
             await asyncio.sleep(2)
-            await msg.edit(content=f"The slot machine spins and you win ${money}!")
+            await msg.edit(
+                content=f"The slot machine spins and you win ${money}!"
+            )
         else:
             user_bal -= money
+            self.economy[ctx.author.id]["wallet"] = user_bal
             await asyncio.sleep(2)
-            await msg.edit(content=f"the slot machine spins and you lose ${money}!")
+            await msg.edit(
+                content=f"the slot machine spins and you lose ${money}!"
+            )
 
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
-        self.economy[ctx.author.id]["wallet"] = user_bal
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
 
     @gamble.error
@@ -1526,9 +1760,11 @@ class Economy(commands.Cog):
 
     @commands.command(aliases=["stonks", "stocks"])
     @commands.guild_only()
-    @commands.cooldown(1, 10800, commands.BucketType.user)
-    async def invest(self, ctx, money: int = None):
-
+    @commands.cooldown(1, 3600, commands.BucketType.user)
+    async def invest(self, ctx, money=None):
+        
+        MAX_INVEST = 100000
+        
         if not money:
             await ctx.reply(
                 "Please enter a valid amount to invest!", mention_author=False
@@ -1543,11 +1779,20 @@ class Economy(commands.Cog):
         user = self.economy[ctx.author.id]
         user_bal = user["wallet"]
 
-        if money > user_bal or money > 100000:
-            if money > 100000:
-                money = 100000
+        try:
+            money = int(money)
+        except ValueError:
+            if money.lower() == "max" or money.lower() == "all":
+                money = min(user_bal, MAX_INVEST)
+            else:
+                await self.invest.reset_cooldown(ctx)
+                return await ctx.reply("You must enter a valid amount of money!", mention_author=False)
+
+        if money > user_bal or money > MAX_INVEST:
+            if money > MAX_INVEST and money <= user_bal:
+                money = MAX_INVEST
                 await ctx.reply(
-                    "You cannot invest more than $100000! But since I am nice I will let you invest $100000",
+                    f"You cannot invest more than ${money}! But since I am nice I will let you invest $100000",
                     mention_author=False,
                 )
             else:
@@ -1579,7 +1824,8 @@ class Economy(commands.Cog):
             money = money * multiplier
             user_bal += money
             await ctx.reply(
-                f"Your investment paid off! You earned ${money}!", mention_author=False
+                f"Your investment paid off! You earned ${money}!",
+                mention_author=False,
             )
 
         max_bank = get_max_bank(user)
@@ -1587,7 +1833,8 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] = user_bal
 
         collection.update_one(
-            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal, "maxbank": max_bank}}
+            {"_id": ctx.author.id},
+            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
         )
 
     @invest.error
@@ -1622,13 +1869,15 @@ class Economy(commands.Cog):
 
         if money <= 0:
             await ctx.reply(
-                "You cannot give someone $0 or negative money!", mention_author=False
+                "You cannot give someone $0 or negative money!",
+                mention_author=False,
             )
             return
 
         if ctx.author.id not in self.users_in_db:
             await ctx.reply(
-                "You cannot give more money than you own!", mention_author=False
+                "You cannot give more money than you own!",
+                mention_author=False,
             )
             return
 
@@ -1645,7 +1894,8 @@ class Economy(commands.Cog):
 
         if money > user_bal:
             await ctx.reply(
-                "You cannot give more money than you own!", mention_author=False
+                "You cannot give more money than you own!",
+                mention_author=False,
             )
             return
 
@@ -1654,11 +1904,16 @@ class Economy(commands.Cog):
         self.economy[ctx.author.id]["wallet"] = user_bal
         self.economy[member.id]["wallet"] = member_bal
 
-        collection.update_one({"_id": ctx.author.id}, {"$set": {"wallet": user_bal}})
-        collection.update_one({"_id": member.id}, {"$set": {"wallet": member_bal}})
+        collection.update_one(
+            {"_id": ctx.author.id}, {"$set": {"wallet": user_bal}}
+        )
+        collection.update_one(
+            {"_id": member.id}, {"$set": {"wallet": member_bal}}
+        )
 
         await ctx.reply(
-            f"Successfully transfered ${money} to {member}", mention_author=False
+            f"Successfully transfered ${money} to {member}",
+            mention_author=False,
         )
 
     @give.error
@@ -1673,16 +1928,17 @@ class Economy(commands.Cog):
     @commands.command(aliases=["dep"])
     @commands.guild_only()
     async def deposit(self, ctx, money=None):
-
         if not money:
             await ctx.reply(
-                "You did not specify an amount to deposit!", mention_author=False
+                "You did not specify an amount to deposit!",
+                mention_author=False,
             )
             return
 
         if ctx.author.id not in self.users_in_db:
             await ctx.reply(
-                "You cannot deposit more money than you have!", mention_author=False
+                "You cannot deposit more money than you have!",
+                mention_author=False,
             )
             return
 
@@ -1698,7 +1954,9 @@ class Economy(commands.Cog):
         except ValueError:
             if money.lower() == "all":
                 if user_bank == max_bank:
-                    await ctx.reply("Your bank is already full!", mention_author=False)
+                    await ctx.reply(
+                        "Your bank is already full!", mention_author=False
+                    )
                     return
                 if user_bal >= max_bank - user_bank:
                     money = max_bank - user_bank
@@ -1706,13 +1964,15 @@ class Economy(commands.Cog):
                     money = user_bal
             else:
                 await ctx.reply(
-                    "You did not send a valid amount to deposit!", mention_author=False
+                    "You did not send a valid amount to deposit!",
+                    mention_author=False,
                 )
                 return
 
         if money <= 0:
             await ctx.reply(
-                "You cannot deposit $0 or negative money!", mention_author=False
+                "You cannot deposit $0 or negative money!",
+                mention_author=False,
             )
             return
         elif money > user_bal:
@@ -1734,15 +1994,17 @@ class Economy(commands.Cog):
                 {"_id": ctx.author.id},
                 {"$set": {"wallet": user["wallet"], "bank": user["bank"]}},
             )
-            await ctx.reply(f"Successfully deposited ${money}!", mention_author=False)
+            await ctx.reply(
+                f"Successfully deposited ${money}!", mention_author=False
+            )
 
     @commands.command(aliases=["with"])
     @commands.guild_only()
     async def withdraw(self, ctx, money=None):
-
         if not money:
             await ctx.reply(
-                "You did not specify an amount to withdraw!", mention_author=False
+                "You did not specify an amount to withdraw!",
+                mention_author=False,
             )
             return
 
@@ -1766,11 +2028,14 @@ class Economy(commands.Cog):
                 money = user_bank
             else:
                 await ctx.reply(
-                    "You did not send a valid amount to withdraw!", mention_author=False
+                    "You did not send a valid amount to withdraw!",
+                    mention_author=False,
                 )
                 return
         if money < 0:
-            await ctx.reply("You cannot withdraw negative money!", mention_author=False)
+            await ctx.reply(
+                "You cannot withdraw negative money!", mention_author=False
+            )
             return
         elif money > user_bank:
             await ctx.reply(
@@ -1787,12 +2052,13 @@ class Economy(commands.Cog):
                 {"_id": ctx.author.id},
                 {"$set": {"wallet": user_bal, "bank": user_bank}},
             )
-            await ctx.reply(f"Successfully withdrew ${money}", mention_author=False)
+            await ctx.reply(
+                f"Successfully withdrew ${money}", mention_author=False
+            )
 
     @commands.command(aliases=["balance"])
     @commands.guild_only()
     async def bal(self, ctx, *, member: discord.User = None):
-
         if not member:
             member = ctx.author
 
