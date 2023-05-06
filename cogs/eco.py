@@ -50,8 +50,22 @@ def get_dict(user):
         "pistol": 0,
         "sniper": 0,
         "bullet": 0,
-        "slots": {"maxwin": 0, "maxloss": 0, "win": 0, "loss": 0},
-        "bj": {"maxwin": 0, "maxloss": 0, "win": 0, "loss": 0},
+        "slots": {
+            "maxwin": 0,
+            "maxloss": 0,
+            "win": 0,
+            "loss": 0,
+            "wins": 0,
+            "total": 0,
+        },
+        "bj": {
+            "maxwin": 0,
+            "maxloss": 0,
+            "win": 0,
+            "loss": 0,
+            "wins": 0,
+            "total": 0,
+        },
     }
 
 
@@ -1571,6 +1585,12 @@ class Economy(commands.Cog):
             max_loss = self.economy[member.id][c]["maxloss"]
             win = self.economy[member.id][c]["win"]
             loss = self.economy[member.id][c]["loss"]
+            wins = self.economy[member.id][c]["wins"]
+            total = self.economy[member.id][c]["total"]
+
+            stats[c].append(
+                f"Winrate: {round((wins/total)* 100, 2) if wins != 0 else 0} %"
+            )
             stats[c].append(f"Net Winnings: ${win - loss}")
             stats[c].append(f"Total Winnings: ${win}")
             stats[c].append(f"Total losses: ${loss}")
@@ -1724,6 +1744,7 @@ class Economy(commands.Cog):
             title = f"Capsino: {ctx.author} won ${abs(amount)}!"
 
             self.economy[ctx.author.id]["bj"]["win"] += amount
+            self.economy[ctx.author.id]["bj"]["wins"] += 1
             if abs(amount) > self.economy[ctx.author.id]["bj"]["maxwin"]:
                 self.economy[ctx.author.id]["bj"]["maxwin"] = abs(amount)
 
@@ -1732,9 +1753,11 @@ class Economy(commands.Cog):
         else:
             title = f"Capsino: Dealer wins ${money}!"
 
-            self.economy[ctx.author.id]["bj"]["loss"] += amount
+            self.economy[ctx.author.id]["bj"]["loss"] += abs(amount)
             if abs(amount) > self.economy[ctx.author.id]["bj"]["maxloss"]:
                 self.economy[ctx.author.id]["bj"]["maxloss"] = abs(amount)
+
+        self.economy[ctx.author.id]["bj"]["total"] += 1
 
         collection.update_one(
             {"_id": ctx.author.id},
@@ -1817,6 +1840,7 @@ class Economy(commands.Cog):
             user_bal += money
             self.economy[ctx.author.id]["wallet"] = user_bal
             self.economy[ctx.author.id]["slots"]["win"] += money
+            self.economy[ctx.author.id]["slots"]["wins"] += 1
             if money > self.economy[ctx.author.id]["slots"]["maxwin"]:
                 self.economy[ctx.author.id]["slots"]["maxwin"] = money
 
@@ -1838,6 +1862,7 @@ class Economy(commands.Cog):
 
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
+        self.economy[ctx.author.id]["slots"]["total"] += 1
 
         collection.update_one(
             {"_id": ctx.author.id},
