@@ -50,6 +50,8 @@ def get_dict(user):
         "pistol": 0,
         "sniper": 0,
         "bullet": 0,
+        "slots": {"maxwin": 0, "maxloss": 0, "win": 0, "loss": 0},
+        "bj": {"maxwin": 0, "maxloss": 0, "win": 0, "loss": 0},
     }
 
 
@@ -135,7 +137,6 @@ class Economy(commands.Cog):
         self.itemvalue = {
             "laptop": 1500,
             "rod": 200,
-            "instrument": 500,
             "gun": 5000,
             "lifesaver": 15000,
             "capybara": 1000000000,
@@ -1550,6 +1551,52 @@ class Economy(commands.Cog):
         await ctx.send(embed=embed)
 
     # ---------------------------------- Gambling commands ---------------------------------------
+    @commands.command(aliases=["stats"])
+    @commands.guild_only()
+    async def gamblestats(self, ctx, member: discord.User = None):
+        if not member:
+            member = ctx.author
+
+        if member.id not in self.users_in_db:
+            self.process_user(member)
+
+        commands = ["bj", "slots"]
+        stats = {
+            "bj": [],
+            "slots": [],
+        }
+
+        for c in commands:
+            max_win = self.economy[member.id][c]["maxwin"]
+            max_loss = self.economy[member.id][c]["maxloss"]
+            win = self.economy[member.id][c]["win"]
+            loss = self.economy[member.id][c]["loss"]
+            stats[c].append(f"Net Winnings: ${win - loss}")
+            stats[c].append(f"Total Winnings: ${win}")
+            stats[c].append(f"Total losses: ${loss}")
+            stats[c].append(f"Maximum win: ${max_win}")
+            stats[c].append(f"Maximum loss: ${max_loss}")
+
+        embed = discord.Embed(
+            title=f"{member}'s gambling stats",
+            description="",
+            color=0xEEE657,
+        )
+
+        embed.add_field(name="BlackJack", value="\n".join(stats["bj"]))
+        embed.add_field(name="Slots", value="\n".join(stats["slots"]))
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    @gamblestats.error
+    async def gamblestats_error(self, ctx, error):
+        if isinstance(error, commands.BadArgument):
+            await ctx.reply(
+                "Please mention a valid user!", mention_author=False
+            )
+        else:
+            raise error
+
     @commands.command(aliases=["bj"])
     @commands.guild_only()
     @commands.cooldown(1, 10, commands.BucketType.user)
@@ -1598,7 +1645,9 @@ class Economy(commands.Cog):
                 f"You can only gamble ${MAX_GAMBLE}", mention_author=False
             )
 
-        self.economy[ctx.author.id]["wallet"] -= money  # remove money for a bit
+        self.economy[ctx.author.id][
+            "wallet"
+        ] -= money  # remove money for a bit
 
         win_rate = {"W": 1, "D": 0, "L": -1, "BJ": 1.5}
         possible_cards = {str(i): i for i in range(2, 11)} | {
@@ -1653,25 +1702,50 @@ class Economy(commands.Cog):
         )
         if result == "L" and bj.double:
             multiplier = -1
-        
+
         amount = round(multiplier * money)
         user_bal += amount
+
+        """if result == "L":
+            self.economy[ctx.author.id]["bj"]["loss"] += amount
+            if abs(amount) > self.economy[ctx.author.id]["bj"]["maxloss"]:
+                self.economy[ctx.author.id]["bj"]["maxloss"] = abs(amount)
+        
+        if result == "W" or result == "BJ":
+            self.economy[ctx.author.id]["bj"]["win"] += amount
+            if abs(amount) > self.economy[ctx.author.id]["bj"]["maxwin"]:
+                self.economy[ctx.author.id]["bj"]["maxwin"] = abs(amount)"""
 
         self.economy[ctx.author.id]["wallet"] = user_bal
         max_bank = get_max_bank(user)
         self.economy[ctx.author.id]["maxbank"] = max_bank
 
-        collection.update_one(
-            {"_id": ctx.author.id},
-            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
-        )
-
         if result == "W" or result == "BJ":
             title = f"Capsino: {ctx.author} won ${abs(amount)}!"
+
+            self.economy[ctx.author.id]["bj"]["win"] += amount
+            if abs(amount) > self.economy[ctx.author.id]["bj"]["maxwin"]:
+                self.economy[ctx.author.id]["bj"]["maxwin"] = abs(amount)
+
         elif result == "D":
             title = "Capsino: Draw!"
         else:
             title = f"Capsino: Dealer wins ${money}!"
+
+            self.economy[ctx.author.id]["bj"]["loss"] += amount
+            if abs(amount) > self.economy[ctx.author.id]["bj"]["maxloss"]:
+                self.economy[ctx.author.id]["bj"]["maxloss"] = abs(amount)
+
+        collection.update_one(
+            {"_id": ctx.author.id},
+            {
+                "$set": {
+                    "wallet": user_bal,
+                    "maxbank": max_bank,
+                    "bj": self.economy[ctx.author.id]["bj"],
+                }
+            },
+        )
 
         embed = discord.Embed(
             title=title,
@@ -1739,8 +1813,13 @@ class Economy(commands.Cog):
             multiplier = random.randint(1, 501)
             if multiplier == 500 or multiplier == 69:
                 money *= 10
+
             user_bal += money
             self.economy[ctx.author.id]["wallet"] = user_bal
+            self.economy[ctx.author.id]["slots"]["win"] += money
+            if money > self.economy[ctx.author.id]["slots"]["maxwin"]:
+                self.economy[ctx.author.id]["slots"]["maxwin"] = money
+
             await asyncio.sleep(2)
             await msg.edit(
                 content=f"The slot machine spins and you win ${money}!"
@@ -1748,6 +1827,10 @@ class Economy(commands.Cog):
         else:
             user_bal -= money
             self.economy[ctx.author.id]["wallet"] = user_bal
+            self.economy[ctx.author.id]["slots"]["loss"] += money
+            if money > self.economy[ctx.author.id]["slots"]["maxloss"]:
+                self.economy[ctx.author.id]["slots"]["maxloss"] = money
+
             await asyncio.sleep(2)
             await msg.edit(
                 content=f"the slot machine spins and you lose ${money}!"
@@ -1758,7 +1841,13 @@ class Economy(commands.Cog):
 
         collection.update_one(
             {"_id": ctx.author.id},
-            {"$set": {"wallet": user_bal, "maxbank": max_bank}},
+            {
+                "$set": {
+                    "wallet": user_bal,
+                    "maxbank": max_bank,
+                    "slots": self.economy[ctx.author.id]["slots"],
+                }
+            },
         )
 
     @gamble.error
