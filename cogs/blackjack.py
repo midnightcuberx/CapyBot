@@ -2,6 +2,7 @@ import discord
 import random
 import math
 
+
 def get_starting_cards(possible_cards):
     card_1 = random.choice(list(possible_cards.keys()))
     card_2 = random.choice(list(possible_cards.keys()))
@@ -16,8 +17,9 @@ def get_starting_score(possible_cards, card_1, card_2):
 
 
 def get_dealer_score(possible_cards, dealer_hand):
-
-    score = sum([possible_cards[s] for s in dealer_hand])
+    score = ace_filter(
+        dealer_hand, sum([possible_cards[s] for s in dealer_hand])
+    )
 
     while score <= 16:
         score = run_bj(possible_cards, dealer_hand, score)
@@ -33,7 +35,6 @@ def ace_filter(hand, score):
 
 
 def run_bj(possible_cards, hand, score):
-
     card = random.choice(list(possible_cards.keys()))
     hand.append(card)
     score = sum([possible_cards[s] for s in hand])
@@ -49,15 +50,17 @@ def is_blackjack(hand, score):
 
 
 def get_result(player_hand, score, dealer_hand, dealer_score):
-
     if score > 21:
         return "L"
 
-    if dealer_score > 21:
+    if dealer_score > 21 and not is_blackjack(player_hand, score):
         return "W"
 
-    if is_blackjack(player_hand, score) and not is_blackjack(dealer_hand, dealer_score):
+    if is_blackjack(player_hand, score) and not is_blackjack(
+        dealer_hand, dealer_score
+    ):
         result = "BJ"
+
     elif (
         is_blackjack(dealer_hand, dealer_score)
         and not is_blackjack(player_hand, score)
@@ -74,6 +77,7 @@ def get_result(player_hand, score, dealer_hand, dealer_score):
         result = "W"
 
     return result
+
 
 class BlackJack(discord.ui.View):
     def __init__(self, author):
@@ -98,7 +102,9 @@ class BlackJack(discord.ui.View):
 
     # creates a button when pressed you send message
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary)
-    async def Hit(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def Hit(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.response.send_message("Hit", ephemeral=True)
         self.hit = True
         self.stop()
@@ -113,7 +119,9 @@ class BlackJack(discord.ui.View):
         self.stop()
 
     @discord.ui.button(label="Stand", style=discord.ButtonStyle.red)
-    async def stand(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def stand(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await interaction.response.send_message("Stand", ephemeral=True)
         await self.disable_all_items()
         self.stop()
